@@ -1,12 +1,8 @@
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
 import math
+from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -16,52 +12,96 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
+from isaaclab.envs import mdp
+import roboticarm_rl.tasks.manager_based.roboticarm_rl.mdp as self_mdp
 
-from . import mdp
-
-##
-# Pre-defined configs
-##
-
-from isaaclab_assets.robots.cartpole import CARTPOLE_CFG  # isort:skip
-
-
-##
-# Scene definition
-##
+from roboticarm_rl.assets.config import MY_ROBOT_CFG
 
 
 @configclass
 class RoboticarmRlSceneCfg(InteractiveSceneCfg):
-    """Configuration for a cart-pole scene."""
+    """Configuration for the robotic arm reach scene."""
 
-    # ground plane
     ground = AssetBaseCfg(
         prim_path="/World/ground",
-        spawn=sim_utils.GroundPlaneCfg(size=(100.0, 100.0)),
+        spawn=sim_utils.GroundPlaneCfg(
+            size=(100.0, 100.0),
+            physics_material=sim_utils.RigidBodyMaterialCfg(
+                static_friction=0.1,  # 靜摩擦 (越低越容易被推動)
+                dynamic_friction=0.1, # 動摩擦 (越低滑越遠)
+                restitution=0.5,      # 彈性 (撞到牆會彈回來)
+            ),
+        ),
     )
+    # # 地板
+    # ground = AssetBaseCfg(
+    #     prim_path="/World/ground",
+    #     spawn=sim_utils.GroundPlaneCfg(size=(100.0, 100.0)),
+    # )
 
-    # robot
-    robot: ArticulationCfg = CARTPOLE_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-
-    # lights
     dome_light = AssetBaseCfg(
         prim_path="/World/DomeLight",
         spawn=sim_utils.DomeLightCfg(color=(0.9, 0.9, 0.9), intensity=500.0),
     )
 
+    robot: ArticulationCfg = MY_ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
-##
-# MDP settings
-##
+    # target = RigidObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Target",
+    #     spawn=sim_utils.SphereCfg(
+    #         radius=0.03,
+    #         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
+    #         rigid_props=sim_utils.RigidBodyPropertiesCfg(
+    #             disable_gravity=True, 
+    #             kinematic_enabled=True,
+    #         ),
+    #         collision_props=sim_utils.CollisionPropertiesCfg(),
+    #     ),
+    #     # 初始化設定
+    #     init_state=RigidObjectCfg.InitialStateCfg(
+    #         pos=(0.3, 0.0, 0.3), # 預設放在手臂前面
+    #     ),
+    # )
+    target = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Target",
+        spawn=sim_utils.SphereCfg(
+            radius=0.03,
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(1.0, 0.0, 0.0)),
+            
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                disable_gravity=True, 
+                kinematic_enabled=False,
+                
+                # (Air Resistance)
+                linear_damping=1.0, 
+                angular_damping=0.5,
+            ),
+            
 
+            mass_props=sim_utils.MassPropertiesCfg(mass=1.0), 
+
+            # collision_props=sim_utils.CollisionPropertiesCfg(),
+            
+            # physics_material=sim_utils.RigidBodyMaterialCfg(
+            #     static_friction=0.0,  
+            #     dynamic_friction=0.0, 
+            #     restitution=0.0,      
+            # ),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(0.1, 0.0, 0.1),
+        ),
+    )
 
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
-
-    joint_effort = mdp.JointEffortActionCfg(asset_name="robot", joint_names=["slider_to_cart"], scale=100.0)
-
+    arm_action = mdp.JointPositionActionCfg(
+        asset_name="robot", 
+        joint_names=["joint.*"], 
+        scale=2.0, 
+        use_default_offset=True
+    )
 
 @configclass
 class ObservationsCfg:
@@ -70,99 +110,119 @@ class ObservationsCfg:
     @configclass
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
+        
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel)
 
-        # observation terms (order preserved)
-        joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
-        joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel)
+        target_pos = ObsTerm(func=self_mdp.object_position_in_robot_root_frame)
 
         def __post_init__(self) -> None:
             self.enable_corruption = False
             self.concatenate_terms = True
 
-    # observation groups
     policy: PolicyCfg = PolicyCfg()
 
 
 @configclass
 class EventCfg:
     """Configuration for events."""
-
-    # reset
-    reset_cart_position = EventTerm(
-        func=mdp.reset_joints_by_offset,
+    reset_target = EventTerm(
+        func=self_mdp.reset_target_position,
         mode="reset",
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=["slider_to_cart"]),
-            "position_range": (-1.0, 1.0),
-            "velocity_range": (-0.5, 0.5),
+            "x_range": (0.3, 0.6),
+            
+            "y_range": (-0.4, 0.4),
+            
+            "z_range": (0.1, 0.45),
+
+            "asset_cfg": SceneEntityCfg("target"),
+        },
+    )
+    reset_ball_velocity_start = EventTerm(
+        func=self_mdp.reset_target_velocity,
+        mode="reset",
+        params={
+            "velocity_range": (0.3, 0.8), 
+            "asset_cfg": SceneEntityCfg("target"),
         },
     )
 
-    reset_pole_position = EventTerm(
-        func=mdp.reset_joints_by_offset,
-        mode="reset",
+    change_ball_direction = EventTerm(
+        func=self_mdp.reset_target_velocity, 
+        
+        mode="interval", 
+
+        interval_range_s=(0.3, 0.8), 
+        
         params={
-            "asset_cfg": SceneEntityCfg("robot", joint_names=["cart_to_pole"]),
-            "position_range": (-0.25 * math.pi, 0.25 * math.pi),
-            "velocity_range": (-0.25 * math.pi, 0.25 * math.pi),
+            "velocity_range": (0.3, 0.8), 
+            "asset_cfg": SceneEntityCfg("target"),
         },
     )
-
+    enforce_ball_bounds = EventTerm(
+        func=self_mdp.apply_boundary_constraint,
+        mode="interval",
+        interval_range_s=(0.05, 0.05),
+        params={
+            "x_range": (0.3, 0.65), 
+            "y_range": (-0.4, 0.4),
+            "z_range": (0.05, 0.5),
+            
+            "asset_cfg": SceneEntityCfg("target"),
+        },
+    )
 
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
+    
+    track_target = RewTerm(
+        func=self_mdp.distance_to_target_tcp_v2,
+        weight=5.0, 
+        params={
+            "robot_cfg": SceneEntityCfg("robot", body_names=["link7"]), 
+            "target_cfg": SceneEntityCfg("target"),
+            "std": 0.5, 
+            "tcp_offset": (0.084, 0.0, 0.0),
+        },
+    )
 
-    # (1) Constant running reward
-    alive = RewTerm(func=mdp.is_alive, weight=1.0)
-    # (2) Failure penalty
-    terminating = RewTerm(func=mdp.is_terminated, weight=-2.0)
-    # (3) Primary task: keep pole upright
-    pole_pos = RewTerm(
-        func=mdp.joint_pos_target_l2,
-        weight=-1.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["cart_to_pole"]), "target": 0.0},
-    )
-    # (4) Shaping tasks: lower cart velocity
-    cart_vel = RewTerm(
-        func=mdp.joint_vel_l1,
-        weight=-0.01,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["slider_to_cart"])},
-    )
-    # (5) Shaping tasks: lower pole angular velocity
-    pole_vel = RewTerm(
-        func=mdp.joint_vel_l1,
-        weight=-0.005,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["cart_to_pole"])},
-    )
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.1)
+    
+    # joint_limits = RewTerm(func=mdp.joint_pos_limits, weight=-1.0)
+
+    # object_is_reached = RewTerm(
+    #    func=mdp.object_reached, 
+    #    weight=10.0,
+    #    params={"threshold": 0.05}
+    # )
 
 
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
-
-    # (1) Time out
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    # (2) Cart out of bounds
-    cart_out_of_bounds = DoneTerm(
-        func=mdp.joint_pos_out_of_manual_limit,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["slider_to_cart"]), "bounds": (-3.0, 3.0)},
+    # joint_limits = DoneTerm(func=mdp.joint_limits_rel, params={"threshold": 0.95})
+    object_out_of_bounds = DoneTerm(
+        func=self_mdp.object_out_of_bounds,
+        params={
+            "asset_cfg": SceneEntityCfg("target"),
+            "threshold": 2.0,  # 設定 1.0 公尺，超過就重置
+        },
+        time_out=True, 
     )
-
-
-##
-# Environment configuration
-##
-
 
 @configclass
 class RoboticarmRlEnvCfg(ManagerBasedRLEnvCfg):
     # Scene settings
-    scene: RoboticarmRlSceneCfg = RoboticarmRlSceneCfg(num_envs=4096, env_spacing=4.0)
+    scene: RoboticarmRlSceneCfg = RoboticarmRlSceneCfg(num_envs=4096, env_spacing=3.0)
+    
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
     events: EventCfg = EventCfg()
+    
     # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
@@ -170,11 +230,11 @@ class RoboticarmRlEnvCfg(ManagerBasedRLEnvCfg):
     # Post initialization
     def __post_init__(self) -> None:
         """Post initialization."""
-        # general settings
-        self.decimation = 2
-        self.episode_length_s = 5
-        # viewer settings
-        self.viewer.eye = (8.0, 0.0, 5.0)
-        # simulation settings
-        self.sim.dt = 1 / 120
-        self.sim.render_interval = self.decimation
+        # 控制頻率設定
+        self.decimation = 2  # 模擬 2步，決策 1次 (Control Frequency)
+        self.episode_length_s = 5.0 # 每個回合 5 秒
+        
+        self.viewer.eye = (2.0, 2.0, 2.0)
+        self.viewer.lookat = (0.0, 0.0, 0.0)
+        
+        self.sim.dt = 0.01 # 100Hz
