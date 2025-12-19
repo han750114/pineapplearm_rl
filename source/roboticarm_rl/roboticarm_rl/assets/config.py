@@ -25,7 +25,6 @@ MY_ROBOT_CFG = ArticulationCfg(
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.0),
-        # pos=(-94.7, 94.5, 0.0), 
         joint_pos={".*": 0.0},
     ),
     actuators={

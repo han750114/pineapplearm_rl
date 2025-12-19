@@ -8,13 +8,11 @@ from isaaclab.utils.math import quat_apply
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-# rewards.py
-
 def distance_to_target_tcp_v2(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg,
     target_cfg: SceneEntityCfg,
-    std: float = 1.0, # 確保預設值也是 1.0
+    std: float = 1.0,
     tcp_offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> torch.Tensor:
 

@@ -126,49 +126,72 @@ class ObservationsCfg:
 @configclass
 class EventCfg:
     """Configuration for events."""
+    # reset_target = EventTerm(
+    #     func=self_mdp.reset_target_position,
+    #     mode="reset",
+    #     params={
+    #         "x_range": (0.3, 0.6),
+            
+    #         "y_range": (-0.4, 0.4),
+            
+    #         "z_range": (0.1, 0.45),
+
+    #         "asset_cfg": SceneEntityCfg("target"),
+    #     },
+    # )
+    
     reset_target = EventTerm(
         func=self_mdp.reset_target_position,
         mode="reset",
         params={
-            "x_range": (0.3, 0.6),
-            
-            "y_range": (-0.4, 0.4),
-            
-            "z_range": (0.1, 0.45),
-
+            "x_range": (0.45, 0.55),
+            "y_range": (-0.05, 0.05),
+            "z_range": (0.35, 0.45),
             "asset_cfg": SceneEntityCfg("target"),
         },
     )
-    reset_ball_velocity_start = EventTerm(
-        func=self_mdp.reset_target_velocity,
-        mode="reset",
-        params={
-            "velocity_range": (0.3, 0.8), 
-            "asset_cfg": SceneEntityCfg("target"),
-        },
-    )
+    # reset_ball_velocity_start = EventTerm(
+    #     func=self_mdp.reset_target_velocity,
+    #     mode="reset",
+    #     params={
+    #         "velocity_range": (0.3, 0.8), 
+    #         "asset_cfg": SceneEntityCfg("target"),
+    #     },
+    # )
 
-    change_ball_direction = EventTerm(
-        func=self_mdp.reset_target_velocity, 
+    # change_ball_direction = EventTerm(
+    #     func=self_mdp.reset_target_velocity, 
         
+    #     mode="interval", 
+
+    #     interval_range_s=(0.3, 0.8), 
+        
+    #     params={
+    #         "velocity_range": (0.3, 0.8), 
+    #         "asset_cfg": SceneEntityCfg("target"),
+    #     },
+    # )
+    # enforce_ball_bounds = EventTerm(
+    #     func=self_mdp.apply_boundary_constraint,
+    #     mode="interval",
+    #     interval_range_s=(0.05, 0.05),
+    #     params={
+    #         "x_range": (0.3, 0.65), 
+    #         "y_range": (-0.4, 0.4),
+    #         "z_range": (0.05, 0.5),
+            
+    #         "asset_cfg": SceneEntityCfg("target"),
+    #     },
+    # )
+    
+    move_target_circle = EventTerm(
+        func=self_mdp.update_target_circular_motion,
         mode="interval", 
-
-        interval_range_s=(0.3, 0.8), 
-        
+        interval_range_s=(0.02, 0.02),
         params={
-            "velocity_range": (0.3, 0.8), 
-            "asset_cfg": SceneEntityCfg("target"),
-        },
-    )
-    enforce_ball_bounds = EventTerm(
-        func=self_mdp.apply_boundary_constraint,
-        mode="interval",
-        interval_range_s=(0.05, 0.05),
-        params={
-            "x_range": (0.3, 0.65), 
-            "y_range": (-0.4, 0.4),
-            "z_range": (0.05, 0.5),
-            
+            "radius": 0.16,          # 半徑
+            "speed": 2.0,            # 角速度 ( rad/s)
+            "center_pos": (0.5, 0.0, 0.4), # 圓心位置
             "asset_cfg": SceneEntityCfg("target"),
         },
     )
@@ -188,7 +211,7 @@ class RewardsCfg:
         },
     )
 
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.1)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.005)
     
     # joint_limits = RewTerm(func=mdp.joint_pos_limits, weight=-1.0)
 
@@ -208,7 +231,7 @@ class TerminationsCfg:
         func=self_mdp.object_out_of_bounds,
         params={
             "asset_cfg": SceneEntityCfg("target"),
-            "threshold": 2.0,  # 設定 1.0 公尺，超過就重置
+            "threshold": 2.0, 
         },
         time_out=True, 
     )
@@ -230,8 +253,7 @@ class RoboticarmRlEnvCfg(ManagerBasedRLEnvCfg):
     # Post initialization
     def __post_init__(self) -> None:
         """Post initialization."""
-        # 控制頻率設定
-        self.decimation = 2  # 模擬 2步，決策 1次 (Control Frequency)
+        self.decimation = 2  #(Control Frequency)
         self.episode_length_s = 5.0 # 每個回合 5 秒
         
         self.viewer.eye = (2.0, 2.0, 2.0)

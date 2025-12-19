@@ -129,3 +129,41 @@ def apply_boundary_constraint(
 
     asset.write_root_pose_to_sim(torch.cat([local_pos + env_origins, asset.data.root_quat_w[env_ids]], dim=-1), env_ids)
     asset.write_root_velocity_to_sim(root_vel_w, env_ids)
+    
+def update_target_circular_motion(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    radius: float,
+    speed: float,
+    center_pos: tuple[float, float, float],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("target"),
+):
+    """
+    讓目標球以 center_pos 為中心，在 YZ 平面 (垂直面) 進行圓周運動。
+    """
+    asset = env.scene[asset_cfg.name]
+    current_time = env.common_step_counter * env.step_dt
+    phases = env_ids.float() * 0.1 
+
+    angle = current_time * speed + phases
+    sin_val = torch.sin(angle)
+    cos_val = torch.cos(angle)
+    
+    new_pos = asset.data.root_pos_w[env_ids].clone()
+    
+    if env.scene.env_origins is not None:
+        origins = env.scene.env_origins[env_ids]
+    else:
+        origins = torch.zeros_like(new_pos)
+
+    new_pos[:, 0] = origins[:, 0] + center_pos[0] 
+    new_pos[:, 1] = origins[:, 1] + center_pos[1] + radius * cos_val
+    new_pos[:, 2] = origins[:, 2] + center_pos[2] + radius * sin_val
+
+    new_vel = torch.zeros_like(asset.data.root_vel_w[env_ids])
+    new_vel[:, 0] = 0.0
+    new_vel[:, 1] = -1 * radius * speed * sin_val 
+    new_vel[:, 2] = radius * speed * cos_val      
+    
+    asset.write_root_pose_to_sim(torch.cat([new_pos, asset.data.root_quat_w[env_ids]], dim=-1), env_ids)
+    asset.write_root_velocity_to_sim(new_vel, env_ids)
